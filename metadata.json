@@ -1,0 +1,7 @@
+{
+  "name": "Jal-Drishti",
+  "description": "AI-powered real-time water risk analysis and decision system.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}

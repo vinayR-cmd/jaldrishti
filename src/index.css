@@ -1,0 +1,166 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-bg: #050505;
+  --color-card: #0f0f0f;
+  --color-accent: #00ffcc;
+  --color-safe: #10b981;
+  --color-risk: #f59e0b;
+  --color-warning: #f97316;
+  --color-unsafe: #ef4444;
+  --color-ink: #ffffff;
+}
+
+@layer base {
+  body {
+    @apply bg-bg text-ink font-sans antialiased selection:bg-accent selection:text-black;
+    perspective: 2000px;
+  }
+}
+
+.glass-card {
+  @apply bg-card/60 backdrop-blur-3xl border border-white/5 rounded-[2.5rem] p-8 shadow-[0_32px_64px_-16px_rgb(0_0_0_/_0.8)];
+  position: relative;
+  transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
+  transform-style: preserve-3d;
+}
+
+.glass-card:hover {
+  @apply border-white/10 bg-card/80;
+  transform: translateY(-4px);
+}
+
+.glass-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(to bottom right, rgb(255 255 255 / 0.1), transparent, rgb(255 255 255 / 0.05));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+.map-bg {
+  background-image: url('https://picsum.photos/seed/water-map/1920/1080?blur=4');
+  background-size: cover;
+  background-position: center;
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  opacity: 0.25;
+  filter: grayscale(100%) contrast(120%);
+}
+
+.map-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background: radial-gradient(circle at 50% 50%, rgb(10 10 10 / 0.4), #0a0a0a);
+}
+
+.hero-gradient {
+  background:
+    radial-gradient(circle at 50% -20%, rgb(0 255 204 / 0.15), transparent 70%),
+    radial-gradient(circle at 0% 100%, rgb(0 255 204 / 0.05), transparent 50%);
+}
+
+.btn-primary {
+  @apply bg-accent text-black font-black uppercase tracking-widest text-[10px] py-4 px-10 rounded-full transition-all hover:scale-105 hover:shadow-[0_0_30px_rgb(0_255_204_/_0.4)] active:scale-95;
+}
+
+.btn-secondary {
+  @apply bg-white/5 border border-white/10 text-white font-black uppercase tracking-widest text-[10px] py-4 px-10 rounded-full transition-all hover:bg-white/10 active:scale-95;
+}
+
+.notification-badge {
+  @apply absolute -top-1 -right-1 w-4 h-4 bg-unsafe rounded-full border-2 border-bg flex items-center justify-center text-[8px] font-bold;
+}
+
+.heatmap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(45px, 1fr));
+  gap: 6px;
+}
+
+@media (min-width: 768px) {
+  .heatmap-grid {
+    grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+    gap: 10px;
+  }
+}
+
+.heatmap-cell {
+  aspect-ratio: 1;
+  @apply rounded-lg md:rounded-xl border border-white/5 transition-all duration-500;
+}
+
+.heatmap-cell.safe {
+  @apply bg-safe/10 border-safe/20 shadow-[inset_0_0_15px_rgb(16_185_129_/_0.05)];
+}
+
+.heatmap-cell.risk {
+  @apply bg-risk/10 border-risk/20 shadow-[inset_0_0_15px_rgb(245_158_11_/_0.05)];
+}
+
+.heatmap-cell.warning {
+  @apply bg-warning/10 border-warning/20 shadow-[inset_0_0_15px_rgb(249_115_22_/_0.05)];
+}
+
+.heatmap-cell.unsafe {
+  @apply bg-unsafe/10 border-unsafe/20 shadow-[inset_0_0_15px_rgb(239_68_68_/_0.05)];
+}
+
+.heatmap-cell:hover {
+  @apply border-white/30 scale-110 z-10;
+}
+
+.mobile-nav {
+  @apply fixed bottom-6 left-6 right-6 z-[100] bg-card/80 backdrop-blur-3xl border border-white/10 rounded-full px-8 py-4 flex justify-around items-center md:hidden shadow-2xl;
+}
+
+.mobile-nav-item {
+  @apply flex flex-col items-center gap-1 text-white/40 transition-colors;
+}
+
+.mobile-nav-item.active {
+  @apply text-accent;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+  width: 4px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  @apply bg-white/10 rounded-full;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  @apply bg-white/20;
+}
+
+.status-glow-safe {
+  box-shadow: 0 0 20px rgb(16 185 129 / 0.2);
+}
+
+.status-glow-risk {
+  box-shadow: 0 0 20px rgb(245 158 11 / 0.2);
+}
+
+.status-glow-warning {
+  box-shadow: 0 0 20px rgb(249 115 22 / 0.2);
+}
+
+.status-glow-unsafe {
+  box-shadow: 0 0 20px rgb(239 68 68 / 0.2);
+}
