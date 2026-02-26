@@ -83,12 +83,16 @@ export default function MapView({ height = "600px", analysis = null }) {
                     position: "absolute",
                     top: 10,
                     right: 10,
-                    background: "white",
+                    background: "rgba(0, 21, 41, 0.9)",
+                    border: "1px solid rgba(255,255,255,0.1)",
+                    color: "white",
                     padding: "10px",
-                    borderRadius: "5px",
+                    borderRadius: "1rem",
                     zIndex: 1000,
-                    boxShadow: "0 2px 5px rgb(0 0 0 / 0.2)",
-                    fontWeight: "bold"
+                    boxShadow: "0 4px 15px rgb(0 0 0 / 0.5)",
+                    fontWeight: "bold",
+                    fontSize: "0.8rem",
+                    backdropFilter: "blur(10px)"
                 }}
             >
                 🟢 Safe | 🟠 Risk | 🔴 Unsafe

@@ -27,6 +27,8 @@ import { analyzeWaterQuality, WaterAnalysis } from './services/geminiService';
 import { SensorData, CommunityReport } from './types';
 import 'leaflet/dist/leaflet.css';
 import MapView from './MapView';
+import { waterData } from './data';
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -40,6 +42,36 @@ export default function App() {
   const [notification, setNotification] = useState<{ message: string, type: 'warning' | 'info' } | null>(null);
   const [showAlerts, setShowAlerts] = useState(false);
   const [showCriticalModal, setShowCriticalModal] = useState(false);
+  const [graphData, setGraphData] = useState<any[]>([]);
+
+  // Calculate distance between coords in km
+  const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const p = 0.017453292519943295; // Math.PI / 180
+    const c = Math.cos;
+    const a = 0.5 - c((lat2 - lat1) * p) / 2 +
+      c(lat1 * p) * c(lat2 * p) *
+      (1 - c((lon2 - lon1) * p)) / 2;
+    return 12742 * Math.asin(Math.sqrt(a)); // 2 * R; R = 6371 km
+  };
+
+  // Smooth data linearly via moving average
+  const smoothData = (data: any[], windowSize = 5) => {
+    let result = [];
+    for (let i = 0; i < data.length; i++) {
+      let sum = 0;
+      let count = 0;
+      for (let j = Math.max(0, i - windowSize + 1); j <= i; j++) {
+        sum += data[j].tds;
+        count++;
+      }
+      result.push({
+        ...data[i],
+        smoothed_tds: Math.round(sum / count),
+        timeLabel: new Date(data[i].timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      });
+    }
+    return result;
+  };
 
   // Dummy Heatmap Data
   const heatmapData = Array.from({ length: 24 }).map((_, i) => {
@@ -57,30 +89,40 @@ export default function App() {
     };
   });
 
-  const fetchData = async () => {
+  const fetchData = async (localPoints: any[] = null) => {
     setLoading(true);
     try {
-      const [sRes, rRes] = await Promise.all([
-        fetch('/api/water-data'),
-        fetch('/api/reports')
-      ]);
-      const sData = await sRes.json();
-      const rData = await rRes.json();
-      setSensorData(sData);
+      const sourcePoints = localPoints || waterData.slice(0, 10);
+      const sData = sourcePoints.map(d => ({ tds_value: d.tds, lat: d.lat, lng: d.lng }));
+
+      let rData = [];
+      try {
+        const rRes = await fetch('/api/reports');
+        rData = await rRes.json();
+      } catch (e) {
+        // Ignore reports error if no backend
+      }
+
+      setSensorData(sData as any);
       setReports(rData);
 
       if (sData.length > 0) {
-        const areaResult = await analyzeWaterQuality(sData[0].tds_value, rData);
-        setAnalysis(areaResult);
+        try {
+          const areaResult = await analyzeWaterQuality(sData[0].tds_value, rData);
+          setAnalysis(areaResult);
 
-        if (areaResult.score === 'Unsafe' || areaResult.score === 'Risk') {
-          setNotification({
-            message: `Critical: ${areaResult.score} water detected in your area.`,
-            type: 'warning'
-          });
-          if (areaResult.score === 'Unsafe') {
-            setShowCriticalModal(true);
+          if (areaResult.score === 'Unsafe' || areaResult.score === 'Risk') {
+            // Only set critical early notifications if there isn't already a notification
+            setNotification(prev => prev || {
+              message: `Area Scan: ${areaResult.score} water detected locally.`,
+              type: 'warning'
+            });
+            if (areaResult.score === 'Unsafe') {
+              setShowCriticalModal(true);
+            }
           }
+        } catch (分析error) {
+          console.error("Analysis generation failed");
         }
       }
     } catch (error) {
@@ -90,11 +132,49 @@ export default function App() {
     }
   };
 
+  const initializeLocation = () => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const { latitude, longitude } = pos.coords;
+          const sorted = [...waterData].sort((a, b) => getDistance(latitude, longitude, a.lat, a.lng) - getDistance(latitude, longitude, b.lat, b.lng));
+          // Take nearest 50 points and sort them chronologically
+          const nearestRegionTokens = sorted.slice(0, 50).sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+          setGraphData(smoothData(nearestRegionTokens));
+          fetchData(nearestRegionTokens);
+        },
+        () => {
+          // Fallback if denied
+          const fallbackRegion = [...waterData].slice(0, 50).sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+          setGraphData(smoothData(fallbackRegion));
+          fetchData(fallbackRegion);
+        }
+      );
+    } else {
+      const fallbackRegion = [...waterData].slice(0, 50).sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+      setGraphData(smoothData(fallbackRegion));
+      fetchData(fallbackRegion);
+    }
+  };
+
   useEffect(() => {
     if (isLoggedIn) {
-      fetchData();
-      const interval = setInterval(fetchData, 30000);
-      return () => clearInterval(interval);
+      initializeLocation();
+      const interval = setInterval(() => { fetchData(graphData) }, 30000);
+
+      // 1 minute timeout notification for nearby contamination area
+      const contaminationTimeout = setTimeout(() => {
+        setNotification({
+          message: "Alert: A high contamination area has been identified near your active sector.",
+          type: 'warning'
+        });
+        setShowAlerts(true);
+      }, 60000);
+
+      return () => {
+        clearInterval(interval);
+        clearTimeout(contaminationTimeout);
+      };
     }
   }, [isLoggedIn]);
 
@@ -296,7 +376,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen relative bg-bg selection:bg-accent selection:text-black pb-24 md:pb-8">
+    <div className="min-h-screen relative bg-bg selection:bg-accent selection:text-black pb-32 md:pb-8">
       <div className="map-bg" />
       <div className="map-overlay" />
 
@@ -343,7 +423,7 @@ export default function App() {
                     initial={{ opacity: 0, y: 10, scale: 0.95 }}
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                    className="absolute right-0 mt-4 w-72 md:w-80 glass-card p-6 z-50 border-white/10"
+                    className="absolute right-[-60px] md:right-0 mt-4 w-[280px] md:w-80 glass-card p-6 z-[100] border-white/10"
                   >
                     <h4 className="text-xs font-bold uppercase tracking-widest text-white/40 mb-4">Notifications</h4>
                     {notification ? (
@@ -403,32 +483,7 @@ export default function App() {
         <div className="space-y-8">
           {activeTab === 'dashboard' && (
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-              {/* Warning Banner */}
-              <div className="lg:col-span-12">
-                <AnimatePresence>
-                  {notification && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0, marginBottom: 0, rotateX: -20 }}
-                      animate={{ height: 'auto', opacity: 1, marginBottom: 32, rotateX: 0 }}
-                      exit={{ height: 0, opacity: 0, marginBottom: 0, rotateX: -20 }}
-                      className="overflow-hidden"
-                    >
-                      <div className="p-4 md:p-6 rounded-[1.5rem] md:rounded-[2rem] bg-unsafe/10 border border-unsafe/20 backdrop-blur-xl flex items-center gap-4 md:gap-6 shadow-2xl">
-                        <div className="w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl bg-unsafe/20 flex items-center justify-center shrink-0">
-                          <ShieldAlert className="text-unsafe w-5 h-5 md:w-6 md:h-6" />
-                        </div>
-                        <div className="flex-1">
-                          <h4 className="text-[10px] font-black uppercase tracking-[0.2em] text-unsafe mb-1">Critical Water Warning</h4>
-                          <p className="text-xs md:text-sm text-white/80 font-medium">{notification.message}</p>
-                        </div>
-                        <button onClick={() => setNotification(null)} className="p-2 hover:bg-white/5 rounded-full transition-colors">
-                          <X className="w-4 h-4 md:w-5 h-5 text-white/40" />
-                        </button>
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-              </div>
+              {/* Removed the fixed overlay Warning Banner entirely to avoid mobile overlap */}
 
               {/* Main Display Card */}
               <motion.div
@@ -478,7 +533,7 @@ export default function App() {
                     <div className="flex flex-col gap-4 md:gap-6 justify-center">
                       <motion.div
                         whileHover={{ translateZ: 30, scale: 1.02 }}
-                        className={`sticky top-24 z-40 p-6 md:p-8 rounded-[1.5rem] md:rounded-[2rem] bg-card/80 backdrop-blur-2xl border ${houseStatus.border} hover:border-white/10 transition-all flex items-center gap-6 md:gap-8 group/item shadow-2xl`}
+                        className={`z-40 p-5 md:p-6 rounded-3xl bg-card/80 backdrop-blur-2xl border ${houseStatus.border} hover:border-white/10 transition-all flex items-center gap-4 md:gap-6 group/item shadow-2xl`}
                       >
                         <div className={`w-12 h-12 md:w-16 md:h-16 rounded-xl md:rounded-2xl ${houseStatus.bg} ${houseStatus.color} flex items-center justify-center group-hover/item:scale-110 transition-transform`}>
                           <Home className="w-6 h-6 md:w-8 h-8" />
@@ -490,7 +545,7 @@ export default function App() {
                       </motion.div>
                       <motion.div
                         whileHover={{ translateZ: 20, scale: 1.02 }}
-                        className={`p-6 md:p-8 rounded-[1.5rem] md:rounded-[2rem] bg-white/5 border ${statusInfo.border} hover:border-white/10 transition-all flex items-center gap-6 md:gap-8 group/item`}
+                        className={`p-5 md:p-6 rounded-3xl bg-white/5 border ${statusInfo.border} hover:border-white/10 transition-all flex items-center gap-4 md:gap-6 group/item`}
                       >
                         <div className={`w-12 h-12 md:w-16 md:h-16 rounded-xl md:rounded-2xl ${statusInfo.bg} ${statusInfo.color} flex items-center justify-center group-hover/item:scale-110 transition-transform`}>
                           <MapIcon className="w-6 h-6 md:w-8 h-8" />
@@ -504,7 +559,7 @@ export default function App() {
                   </div>
 
                   {/* Mini Heatmap Preview */}
-                  <div className="mt-8 p-6 rounded-[1.5rem] md:rounded-[2rem] bg-white/5 border border-white/5 overflow-hidden group/heatmap cursor-pointer" onClick={() => setActiveTab('heatmap')}>
+                  <div className="mt-8 p-6 rounded-3xl bg-white/5 border border-white/5 overflow-hidden group/heatmap cursor-pointer" onClick={() => setActiveTab('heatmap')}>
                     <div className="flex justify-between items-center mb-4">
                       <h4 className="text-[10px] font-black uppercase tracking-widest text-white/40 flex items-center gap-2">
                         <Globe className="w-3 h-3 text-accent" />
@@ -514,6 +569,48 @@ export default function App() {
                     </div>
                     <div className="relative h-48 md:h-64 rounded-xl border border-white/5 overflow-hidden pointer-events-auto" onClick={(e) => e.stopPropagation()}>
                       <MapView height="100%" analysis={analysis} />
+                    </div>
+                  </div>
+
+                  {/* Dynamic Water Timeline Graph */}
+                  <div className="mt-8 p-6 md:p-8 rounded-3xl bg-white/5 border border-white/5">
+                    <h3 className="text-sm font-black uppercase tracking-widest mb-6 flex items-center gap-2">
+                      <Activity className="w-4 h-4 text-accent" />
+                      Local Water Quality Timeline
+                    </h3>
+
+                    <div className="h-64 w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={graphData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                          <XAxis
+                            dataKey="timeLabel"
+                            stroke="rgba(255,255,255,0.2)"
+                            fontSize={10}
+                            tickMargin={10}
+                            minTickGap={30}
+                          />
+                          <YAxis
+                            stroke="rgba(255,255,255,0.2)"
+                            fontSize={10}
+                            tickFormatter={(val) => `${val}`}
+                          />
+                          <Tooltip
+                            contentStyle={{ backgroundColor: 'rgba(0,21,41,0.9)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '1rem', backdropFilter: 'blur(10px)', fontSize: '12px' }}
+                            itemStyle={{ color: '#0ea5e9', fontWeight: 'bold' }}
+                            labelStyle={{ color: 'rgba(255,255,255,0.5)', marginBottom: '4px' }}
+                          />
+                          {/* Linear type to keep purely straight lines */}
+                          <Line
+                            type="linear"
+                            dataKey="smoothed_tds"
+                            name="TDS Level (PPM)"
+                            stroke="#0ea5e9"
+                            strokeWidth={3}
+                            dot={false}
+                            animationDuration={1500}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
                     </div>
                   </div>
                 </div>
@@ -707,7 +804,7 @@ export default function App() {
                   <p className="text-white/20 text-sm italic py-20 text-center">No reports found in your area.</p>
                 ) : (
                   reports.map((report) => (
-                    <div key={report.id} className="p-6 rounded-[1.5rem] bg-white/5 border border-white/5 hover:border-white/10 transition-colors">
+                    <div key={report.id} className="p-6 rounded-3xl bg-white/5 border border-white/5 hover:border-white/10 transition-colors">
                       <div className="flex justify-between items-start mb-3">
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-full bg-accent/10 flex items-center justify-center">

@@ -4,28 +4,29 @@
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
 
-  --color-bg: #050505;
-  --color-card: #0f0f0f;
-  --color-accent: #00ffcc;
-  --color-safe: #10b981;
+  --color-bg: #000a14;
+  --color-card: #001529;
+  --color-accent: #00d4ff;
+  --color-safe: #0ea5e9;
+  /* Sky blue rather than green */
   --color-risk: #f59e0b;
   --color-warning: #f97316;
   --color-unsafe: #ef4444;
-  --color-ink: #ffffff;
+  --color-ink: #f0f9ff;
 }
 
 @layer base {
   body {
     @apply bg-bg text-ink font-sans antialiased selection:bg-accent selection:text-black;
-    perspective: 2000px;
   }
 }
 
 .glass-card {
-  @apply bg-card/60 backdrop-blur-3xl border border-white/5 rounded-[2.5rem] p-8 shadow-[0_32px_64px_-16px_rgb(0_0_0_/_0.8)];
+  @apply bg-card/60 backdrop-blur-3xl border border-white/5 rounded-3xl p-6 shadow-xl;
   position: relative;
   transition: all 0.5s cubic-bezier(0.23, 1, 0.32, 1);
   transform-style: preserve-3d;
+  perspective: 2000px;
 }
 
 .glass-card:hover {
@@ -122,7 +123,8 @@
 }
 
 .mobile-nav {
-  @apply fixed bottom-6 left-6 right-6 z-[100] bg-card/80 backdrop-blur-3xl border border-white/10 rounded-full px-8 py-4 flex justify-around items-center md:hidden shadow-2xl;
+  @apply fixed bottom-0 left-0 right-0 z-[9999] bg-card border-t border-white/10 px-8 py-4 flex justify-around items-center md:hidden shadow-[0_-10px_40px_rgba(0, 0, 0, 0.8)];
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
 }
 
 .mobile-nav-item {
