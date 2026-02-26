@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import { useEffect, useState, useRef } from "react";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import { AlertTriangle, Zap } from 'lucide-react';
 import { waterData as initialWaterData } from "./data";
 import HeatmapLayer from "./HeatmapLayer";
@@ -17,7 +17,7 @@ L.Icon.Default.mergeOptions({
     shadowUrl: markerShadow,
 });
 
-export default function MapView({ height = "600px", analysis = null }) {
+export default function MapView({ height = "600px", analysis = null, userLocation = null }) {
     const [data, setData] = useState(initialWaterData);
 
     useEffect(() => {
@@ -34,9 +34,25 @@ export default function MapView({ height = "600px", analysis = null }) {
         return () => clearInterval(interval);
     }, []);
 
+    // Helper component to explicitly re-center map when user location changes ONLY ONCE.
+    // By keeping the ref at the parent level, we guarantee it survives child map re-renders.
+    const hasCentered = useRef(false);
+
+    function MapUpdater({ center }) {
+        const map = useMap();
+        useEffect(() => {
+            if (center && !hasCentered.current) {
+                map.setView([center.lat, center.lng], 13);
+                hasCentered.current = true;
+            }
+        }, [center, map]);
+        return null;
+    }
+
     return (
         <div style={{ position: "relative", width: "100%", height: height, borderRadius: "1.5rem", overflow: "hidden" }}>
-            <MapContainer center={[22.0, 79.0]} zoom={5} style={{ height: "100%", width: "100%" }}>
+            <MapContainer center={userLocation ? [userLocation.lat, userLocation.lng] : [22.0, 79.0]} zoom={userLocation ? 13 : 5} style={{ height: "100%", width: "100%" }}>
+                {userLocation && <MapUpdater center={userLocation} />}
                 <TileLayer
                     attribution="&copy; OpenStreetMap"
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -44,8 +60,8 @@ export default function MapView({ height = "600px", analysis = null }) {
 
                 <HeatmapLayer data={data} />
 
-                {analysis && data.length > 0 && (
-                    <Marker position={[data[0].lat, data[0].lng]}>
+                {analysis && userLocation && (
+                    <Marker position={[userLocation.lat, userLocation.lng]}>
                         <Popup className="water-analysis-popup">
                             <div className="p-1 min-w-[200px]">
                                 <h3 className="text-sm font-black uppercase tracking-widest mb-3 flex items-center gap-2 border-b pb-2">

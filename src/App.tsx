@@ -23,12 +23,13 @@ import {
   LogOut
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { analyzeWaterQuality, WaterAnalysis } from './services/geminiService';
+import { analyzeWaterQuality, WaterAnalysis, getStandardWaterDetails } from './services/geminiService';
 import { SensorData, CommunityReport } from './types';
 import 'leaflet/dist/leaflet.css';
 import MapView from './MapView';
 import { waterData } from './data';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import { io } from 'socket.io-client';
 
 export default function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -43,6 +44,8 @@ export default function App() {
   const [showAlerts, setShowAlerts] = useState(false);
   const [showCriticalModal, setShowCriticalModal] = useState(false);
   const [graphData, setGraphData] = useState<any[]>([]);
+  const [liveTDS, setLiveTDS] = useState<number | null>(null);
+  const [userLocation, setUserLocation] = useState<{ lat: number, lng: number } | null>(null);
 
   // Calculate distance between coords in km
   const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -110,18 +113,9 @@ export default function App() {
         try {
           const areaResult = await analyzeWaterQuality(sData[0].tds_value, rData);
           setAnalysis(areaResult);
-
-          if (areaResult.score === 'Unsafe' || areaResult.score === 'Risk') {
-            // Only set critical early notifications if there isn't already a notification
-            setNotification(prev => prev || {
-              message: `Area Scan: ${areaResult.score} water detected locally.`,
-              type: 'warning'
-            });
-            if (areaResult.score === 'Unsafe') {
-              setShowCriticalModal(true);
-            }
-          }
-        } catch (分析error) {
+          // Initial analysis complete, but we won't throw critical modals based on the mock backend load.
+          // Wait for live socket data for warnings.
+        } catch (error) {
           console.error("Analysis generation failed");
         }
       }
@@ -137,6 +131,7 @@ export default function App() {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           const { latitude, longitude } = pos.coords;
+          setUserLocation({ lat: latitude, lng: longitude });
           const sorted = [...waterData].sort((a, b) => getDistance(latitude, longitude, a.lat, a.lng) - getDistance(latitude, longitude, b.lat, b.lng));
           // Take nearest 50 points and sort them chronologically
           const nearestRegionTokens = sorted.slice(0, 50).sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
@@ -158,22 +153,31 @@ export default function App() {
   };
 
   useEffect(() => {
+    let socket: any;
+
     if (isLoggedIn) {
       initializeLocation();
-      const interval = setInterval(() => { fetchData(graphData) }, 30000);
 
-      // 1 minute timeout notification for nearby contamination area
-      const contaminationTimeout = setTimeout(() => {
-        setNotification({
-          message: "Alert: A high contamination area has been identified near your active sector.",
-          type: 'warning'
-        });
-        setShowAlerts(true);
-      }, 60000);
+      // Connect to ESP8266 Node backend
+      // Dynamically use the host IP so mobile phones don't try to connect to their own localhost
+      const backendUrl = `http://${window.location.hostname}:3001`;
+      socket = io(backendUrl);
+      socket.on('tdsUpdate', (data: { tds: number, timestamp?: string }) => {
+        if (data && data.tds !== undefined) {
+          const roundedTDS = Math.round(data.tds);
+          setLiveTDS(roundedTDS);
+          setGraphData(prev => {
+            const nextData = [...prev.slice(1), {
+              timestamp: new Date().toISOString(),
+              tds_level: roundedTDS
+            }];
+            return nextData;
+          });
+        }
+      });
 
       return () => {
-        clearInterval(interval);
-        clearTimeout(contaminationTimeout);
+        if (socket) socket.disconnect();
       };
     }
   }, [isLoggedIn]);
@@ -214,10 +218,14 @@ export default function App() {
     return { color: 'text-unsafe', bg: 'bg-unsafe/10', border: 'border-unsafe/20', glow: 'bg-unsafe', label: 'Unsafe' };
   };
 
-  const currentTDS = sensorData[0]?.tds_value || 0;
+  // Start at a Safe baseline of 120 PPM while waiting for the first live socket push
+  const currentTDS = liveTDS !== null ? liveTDS : 120;
   const statusInfo = getStatusInfo(currentTDS);
-  const houseTDS = Math.max(50, currentTDS - 100);
+  const houseTDS = Math.max(50, Math.round(currentTDS * 0.9)); // Keep house slightly cleaner or proportional, no decimals
   const houseStatus = getStatusInfo(houseTDS);
+
+  // Derive immediate local text based on current TDS without waiting for a new Gemini API call
+  const dynamicWaterDetails = getStandardWaterDetails(currentTDS);
 
   if (!isLoggedIn) {
     return (
@@ -511,13 +519,13 @@ export default function App() {
                           <motion.h2
                             animate={{ y: [0, -5, 0] }}
                             transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-                            className={`text-8xl md:text-[12rem] font-black tracking-tighter leading-[0.8] ${statusInfo.color}`}
+                            className={`text-[6rem] sm:text-7xl md:text-[9rem] lg:text-[12rem] font-black tracking-tighter leading-[0.8] ${statusInfo.color}`}
                           >
                             {currentTDS}
                           </motion.h2>
                           <div className="flex flex-col">
-                            <span className="text-xl md:text-3xl font-black text-white/20 uppercase tracking-widest">PPM</span>
-                            <span className="text-[10px] font-bold text-white/10 uppercase tracking-widest">Total Dissolved Solids</span>
+                            <span className="text-xl md:text-3xl font-black text-white/20 uppercase tracking-widest leading-none">PPM</span>
+                            <span className="text-[8px] md:text-[10px] font-bold text-white/10 uppercase tracking-widest mt-1">Total Dissolved<br />Solids</span>
                           </div>
                         </div>
                         <div className={`inline-flex items-center gap-3 mt-6 md:mt-10 px-6 md:px-8 py-2 md:py-3 rounded-full text-[10px] md:text-xs font-black uppercase tracking-[0.3em] ${statusInfo.bg} ${statusInfo.color} border ${statusInfo.border} shadow-2xl`}>
@@ -526,7 +534,7 @@ export default function App() {
                         </div>
                       </div>
                       <p className="text-lg md:text-2xl font-medium text-white/70 max-w-xl leading-relaxed italic">
-                        "{analysis?.explanation || 'Analyzing water quality parameters...'}"
+                        "{dynamicWaterDetails.explanation}"
                       </p>
                     </div>
 
@@ -568,7 +576,7 @@ export default function App() {
                       <span className="text-[8px] font-black text-accent uppercase tracking-widest group-hover:underline">Click Map Marker for details</span>
                     </div>
                     <div className="relative h-48 md:h-64 rounded-xl border border-white/5 overflow-hidden pointer-events-auto" onClick={(e) => e.stopPropagation()}>
-                      <MapView height="100%" analysis={analysis} />
+                      <MapView height="100%" analysis={analysis} userLocation={userLocation} />
                     </div>
                   </div>
 
@@ -765,7 +773,7 @@ export default function App() {
               </div>
 
               <div className="w-full relative z-10 mb-12">
-                <MapView />
+                <MapView analysis={analysis} userLocation={userLocation} />
               </div>
 
               <div className="mt-12 p-8 rounded-[2rem] bg-white/5 border border-white/5">
